@@ -58,6 +58,8 @@ const base: PanelState = {
   status: "idle",
   stale: false,
   truncated: false,
+  classes: [],
+  variables: [],
   methods: [],
   storyPending: false,
   usageSearchPending: false,
@@ -75,6 +77,56 @@ const done: PanelState = {
       "이 파일은 가게 계산대에 서 있는 계산원 같아요. 손님이 바구니에 물건을 담으면 하나하나 값을 더하고, 할인 쿠폰이 있으면 그만큼 깎아 준 다음, 마지막에 내야 할 돈을 알려 줘요.",
     keyPoints: ["물건 값을 모두 더해요", "쿠폰이 있으면 값을 깎아 줘요", "빈 바구니면 0원을 알려 줘요"],
   },
+  classes: [
+    {
+      id: "c1",
+      name: "Cart",
+      line: 4,
+      character: 13,
+      role: "손님의 물건을 담아 두고 값을 계산해 주는 바구니예요.",
+      parents: [
+        {
+          name: "Container",
+          uri: "file:///demo/src/container.ts",
+          line: 2,
+          character: 22,
+          explanation:
+            "Container는 무엇이든 담을 수 있는 상자 집안이에요. Cart는 이 집안에서 '담기'와 '꺼내기' 솜씨를 그대로 물려받아서, 따로 배우지 않아도 물건을 담을 수 있어요.",
+        },
+        {
+          name: "Printable",
+          explanation:
+            "Printable은 '종이에 찍어낼 수 있어요'라는 약속이에요. Cart는 이 약속을 했기 때문에, 영수증을 만들어 달라는 부탁을 받으면 꼭 들어줘야 해요.",
+        },
+      ],
+    },
+  ],
+  variables: [
+    {
+      id: "v1",
+      name: "TAX_RATE",
+      line: 1,
+      character: 6,
+      range: { startLine: 1, endLine: 1 },
+      explanation: {
+        role: "물건값에 얼마만큼 세금을 더 붙일지 적어 둔 팻말이에요.",
+        story: "계산이 끝날 때마다 이 팻말을 보고 세금을 더해요. 한 번 적어 두면 바뀌지 않아요.",
+      },
+    },
+    {
+      id: "v2",
+      name: "items",
+      container: "Cart",
+      line: 6,
+      character: 10,
+      range: { startLine: 6, endLine: 6 },
+      explanation: {
+        role: "손님이 담은 물건들을 차례대로 넣어 두는 바구니 속이에요.",
+        story: "물건을 담을 때 여기에 하나씩 넣고, 값을 계산할 때 여기서 하나씩 꺼내 봐요.",
+      },
+    },
+    { id: "v3", name: "coupon", container: "Cart", line: 7, character: 10 },
+  ],
   methods: [
     {
       id: "m1",
@@ -139,6 +191,8 @@ const running: PanelState = {
   status: "running",
   stage: "writing",
   summary: undefined,
+  classes: done.classes.map((item) => ({ ...item, role: undefined, parents: item.parents.map((parent) => ({ name: parent.name })) })),
+  variables: done.variables.map((variable) => ({ ...variable, explanation: undefined })),
   storyPending: true,
   usageSearchPending: true,
   methods: done.methods.map((method) => ({ ...method, explanation: undefined, usages: [], usageTotal: 0 })),
@@ -160,7 +214,8 @@ const SCREENS: Record<string, PanelState> = {
   running,
   purposes: purposePending,
   done,
-  stale: { ...done, stale: true, truncated: true },
+  stale: { ...done, stale: true, truncated: true, savedAt: "2026-10-01T09:12:00+09:00" },
+  saved: { ...done, savedAt: "2026-10-01T09:12:00+09:00" },
   error: {
     ...base,
     status: "error",

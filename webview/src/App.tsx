@@ -1,10 +1,12 @@
 import { BookOpenIcon, RefreshCwIcon, SquareIcon } from "lucide-react"
 import type { PanelState } from "@shared/protocol"
+import { ClassList } from "@/components/ClassList"
 import { ErrorView } from "@/components/ErrorView"
 import { IdleView } from "@/components/IdleView"
 import { MethodList } from "@/components/MethodList"
 import { StatusLine } from "@/components/StatusLine"
 import { SummaryCard } from "@/components/SummaryCard"
+import { VariableList } from "@/components/VariableList"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { send, usePanelState } from "@/lib/vscode"
@@ -80,10 +82,26 @@ function Explanation({ state }: { state: PanelState }) {
         </Notice>
       )}
       {state.truncated && <Notice>파일이 아주 길어서 앞부분만 읽고 설명했어요.</Notice>}
+      {state.savedAt && state.status === "done" && (
+        <p className="px-1 text-xs text-muted-foreground">{savedNote(state.savedAt)}</p>
+      )}
       <SummaryCard summary={state.summary} />
+      <ClassList state={state} />
+      <VariableList key={state.file?.uri} state={state} />
       <MethodList state={state} />
     </>
   )
+}
+
+/** "10월 2일 오전 9:12에 만들어 저장해 둔 설명이에요." */
+function savedNote(savedAt: string): string {
+  const when = new Date(savedAt)
+  if (Number.isNaN(when.getTime())) {
+    return "저장해 둔 설명이에요."
+  }
+  const date = when.toLocaleDateString("ko-KR", { month: "long", day: "numeric" })
+  const time = when.toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" })
+  return `${date} ${time}에 만들어 저장해 둔 설명이에요.`
 }
 
 function Notice({ children }: { children: React.ReactNode }) {

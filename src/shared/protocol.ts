@@ -62,6 +62,48 @@ export interface MethodView {
   usageTotal: number;
 }
 
+export interface VariableExplanation {
+  /** What the variable holds or remembers. */
+  role: string;
+  /** How the code in this file uses it. */
+  story: string;
+}
+
+/** A variable defined outside any method: a global, a constant, or a field of a class. */
+export interface VariableView {
+  id: string;
+  name: string;
+  /** Owning class or object, if any. */
+  container?: string;
+  /** 0-based position of the variable's name, when known. */
+  line?: number;
+  character?: number;
+  /** The whole declaration. */
+  range?: LineRange;
+  explanation?: VariableExplanation;
+}
+
+/** Something a class inherits from: a base class or an interface it implements. */
+export interface ParentView {
+  name: string;
+  /** Where the parent is defined, when it was found inside the project. */
+  uri?: string;
+  line?: number;
+  character?: number;
+  explanation?: string;
+}
+
+/** A class that inherits from something. */
+export interface ClassView {
+  id: string;
+  name: string;
+  /** 0-based position of the class name, when known. */
+  line?: number;
+  character?: number;
+  role?: string;
+  parents: ParentView[];
+}
+
 export type Stage = 'symbols' | 'writing';
 
 export type ErrorKind = 'cli-not-found' | 'timeout' | 'failed';
@@ -84,6 +126,9 @@ export interface PanelState {
   /** Only the first part of a very long file was read. */
   truncated: boolean;
   summary?: Summary;
+  /** Classes that inherit from something, with what they inherit. */
+  classes: ClassView[];
+  variables: VariableView[];
   methods: MethodView[];
   /** Summary and method stories are still being written. */
   storyPending: boolean;
@@ -99,6 +144,8 @@ export interface PanelState {
    * so some may be missing or wrong (the JetBrains plugin, where the IDE offers no reference search).
    */
   usageApproximate?: boolean;
+  /** When the shown explanation was written (ISO time), if it came from the saved copy on disk. */
+  savedAt?: string;
   provider: ProviderId;
   mode: 'manual' | 'auto';
 }

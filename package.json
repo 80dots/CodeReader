@@ -2,7 +2,7 @@
   "name": "code-reader",
   "displayName": "Code Reader",
   "description": "열려 있는 코드를 동화책처럼 쉬운 말로 설명해 주는 패널",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "publisher": "codereader-dev",
   "private": true,
   "engines": {
