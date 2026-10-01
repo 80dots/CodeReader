@@ -1,0 +1,78 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+/* VS Code marks the webview body with vscode-dark / vscode-light / vscode-high-contrast. */
+@custom-variant dark (&:is(.vscode-dark *, .vscode-high-contrast:not(.vscode-high-contrast-light) *));
+
+@theme inline {
+    --font-heading: var(--font-sans);
+    --font-sans: var(--vscode-font-family), system-ui, sans-serif;
+    --font-mono: var(--vscode-editor-font-family), ui-monospace, monospace;
+    --color-ring: var(--ring);
+    --color-input: var(--input);
+    --color-border: var(--border);
+    --color-destructive: var(--destructive);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-accent: var(--accent);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-muted: var(--muted);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-secondary: var(--secondary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-primary: var(--primary);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-popover: var(--popover);
+    --color-card-foreground: var(--card-foreground);
+    --color-card: var(--card);
+    --color-foreground: var(--foreground);
+    --color-background: var(--background);
+    --color-link: var(--link);
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) * 1.4);
+    --radius-2xl: calc(var(--radius) * 1.8);
+    --radius-3xl: calc(var(--radius) * 2.2);
+    --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* shadcn tokens follow the active VS Code color theme, so light/dark/high-contrast just work. */
+:root {
+    --background: var(--vscode-sideBar-background);
+    --foreground: var(--vscode-foreground);
+    --card: var(--vscode-editor-background);
+    --card-foreground: var(--vscode-editor-foreground);
+    --popover: var(--vscode-editorWidget-background);
+    --popover-foreground: var(--vscode-editorWidget-foreground, var(--vscode-foreground));
+    --primary: var(--vscode-button-background);
+    --primary-foreground: var(--vscode-button-foreground);
+    --secondary: var(--vscode-button-secondaryBackground);
+    --secondary-foreground: var(--vscode-button-secondaryForeground);
+    --muted: color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
+    --muted-foreground: var(--vscode-descriptionForeground);
+    --accent: var(--vscode-list-hoverBackground);
+    --accent-foreground: var(--vscode-foreground);
+    --destructive: var(--vscode-errorForeground);
+    --border: var(--vscode-widget-border, color-mix(in srgb, var(--vscode-foreground) 16%, transparent));
+    --input: var(--vscode-input-border, var(--border));
+    --ring: var(--vscode-focusBorder);
+    --link: var(--vscode-textLink-foreground);
+    --radius: 0.5rem;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+  }
+  body {
+    @apply bg-background text-foreground;
+    padding: 0;
+    /* Korean reads better when lines break between words, not inside them. */
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+  }
+}

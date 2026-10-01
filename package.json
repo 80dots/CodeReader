@@ -1,0 +1,162 @@
+{
+  "name": "code-reader",
+  "displayName": "Code Reader",
+  "description": "열려 있는 코드를 동화책처럼 쉬운 말로 설명해 주는 패널",
+  "version": "0.0.1",
+  "publisher": "codereader-dev",
+  "private": true,
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "codeReader",
+          "title": "Code Reader",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "codeReader": [
+        {
+          "type": "webview",
+          "id": "codeReader.panel",
+          "name": "코드 설명"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "codeReader.explain",
+        "title": "이 코드 설명하기",
+        "category": "Code Reader",
+        "icon": "$(book)"
+      },
+      {
+        "command": "codeReader.refresh",
+        "title": "다시 설명하기",
+        "category": "Code Reader",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "codeReader.openSettings",
+        "title": "설정 열기",
+        "category": "Code Reader",
+        "icon": "$(gear)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "codeReader.refresh",
+          "when": "view == codeReader.panel",
+          "group": "navigation@1"
+        },
+        {
+          "command": "codeReader.openSettings",
+          "when": "view == codeReader.panel",
+          "group": "navigation@2"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Code Reader",
+      "properties": {
+        "codeReader.provider": {
+          "type": "string",
+          "enum": [
+            "claude",
+            "codex"
+          ],
+          "enumDescriptions": [
+            "Claude Code CLI의 헤드리스 모드(claude -p)를 사용합니다.",
+            "Codex CLI의 헤드리스 모드(codex exec)를 사용합니다."
+          ],
+          "default": "claude",
+          "description": "설명을 만들 때 사용할 AI CLI."
+        },
+        "codeReader.mode": {
+          "type": "string",
+          "enum": [
+            "manual",
+            "auto"
+          ],
+          "enumDescriptions": [
+            "'이 코드 설명하기' 버튼을 눌렀을 때만 설명을 만듭니다.",
+            "파일을 전환할 때마다 자동으로 설명을 만듭니다. (AI 사용량이 늘어납니다)"
+          ],
+          "default": "manual",
+          "description": "설명을 언제 만들지 정합니다."
+        },
+        "codeReader.language": {
+          "type": "string",
+          "default": "한국어",
+          "description": "설명을 어떤 언어로 쓸지 정합니다. (예: 한국어, English, 日本語)"
+        },
+        "codeReader.maxUsagesPerMethod": {
+          "type": "number",
+          "default": 8,
+          "minimum": 0,
+          "maximum": 30,
+          "description": "메서드 하나당 보여 줄 사용처의 최대 개수."
+        },
+        "codeReader.timeoutSeconds": {
+          "type": "number",
+          "default": 180,
+          "minimum": 30,
+          "description": "AI 응답을 기다리는 최대 시간(초)."
+        },
+        "codeReader.claude.path": {
+          "type": "string",
+          "default": "claude",
+          "description": "Claude Code CLI 실행 파일 경로. PATH에 있으면 그대로 두세요."
+        },
+        "codeReader.claude.model": {
+          "type": "string",
+          "default": "sonnet",
+          "description": "Claude 모델 별칭 또는 전체 이름. (예: sonnet, opus, haiku)"
+        },
+        "codeReader.codex.path": {
+          "type": "string",
+          "default": "codex",
+          "description": "Codex CLI 실행 파일 경로. PATH에 있으면 그대로 두세요."
+        },
+        "codeReader.codex.model": {
+          "type": "string",
+          "default": "",
+          "description": "Codex 모델 이름. 비워 두면 Codex CLI의 기본 모델을 사용합니다."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "npm run build:ext && npm run build:webview",
+    "build:ext": "node esbuild.mjs",
+    "build:webview": "npm --prefix webview run build",
+    "watch:ext": "node esbuild.mjs --watch",
+    "watch:webview": "npm --prefix webview run watch",
+    "typecheck": "tsc --noEmit -p tsconfig.json && npm --prefix webview run typecheck",
+    "try-provider": "node scripts/try-provider.mjs",
+    "test:integration": "npm run build && node scripts/run-integration-test.mjs",
+    "vscode:prepublish": "npm run build",
+    "package": "vsce package --no-dependencies --allow-missing-repository --skip-license"
+  },
+  "dependencies": {
+    "cross-spawn": "^7.0.6"
+  },
+  "devDependencies": {
+    "@types/cross-spawn": "^6.0.6",
+    "@types/node": "^26.6.3",
+    "@types/vscode": "^1.100.0",
+    "@vscode/vsce": "^4.0.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  }
+}
