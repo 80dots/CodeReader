@@ -23,6 +23,11 @@ export function MethodList({ state }: { state: PanelState }) {
       {!discovering && methods.length === 0 && (
         <p className="px-1 text-[13px] text-muted-foreground">이 파일에는 따로 설명할 메서드가 없어요.</p>
       )}
+      {state.usageApproximate && methods.length > 0 && (
+        <p className="px-1 text-xs leading-relaxed text-muted-foreground">
+          쓰이는 곳은 이름으로 찾아본 결과라서, 빠지거나 다른 것이 섞여 있을 수 있어요.
+        </p>
+      )}
       {state.usageError && (
         <p className="px-1 text-xs text-muted-foreground">쓰이는 이유는 알아내지 못했어요. ({state.usageError})</p>
       )}

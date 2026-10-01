@@ -80,6 +80,11 @@ export interface PanelState {
   error?: PanelError;
   /** Finding usage purposes failed; stories are still shown. */
   usageError?: string;
+  /**
+   * Usages come from a search by method name rather than from language analysis,
+   * so some may be missing or wrong (the JetBrains plugin, where the IDE offers no reference search).
+   */
+  usageApproximate?: boolean;
   provider: ProviderId;
   mode: 'manual' | 'auto';
 }

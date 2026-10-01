@@ -8,3 +8,5 @@ esbuild.mjs
 tsconfig.json
 .gitignore
 **/*.map
+jetbrains/**
+code-reader-jetbrains-*.zip

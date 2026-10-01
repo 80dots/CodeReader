@@ -146,7 +146,8 @@
     "try-provider": "node scripts/try-provider.mjs",
     "test:integration": "npm run build && node scripts/run-integration-test.mjs",
     "vscode:prepublish": "npm run build",
-    "package": "vsce package --no-dependencies --allow-missing-repository --skip-license"
+    "package": "vsce package --no-dependencies --allow-missing-repository --skip-license",
+    "package:jetbrains": "npm run build && node scripts/package-jetbrains.mjs"
   },
   "dependencies": {
     "cross-spawn": "^7.0.6"
