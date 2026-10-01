@@ -1,0 +1,37 @@
+<idea-plugin>
+  <id>dev.codereader</id>
+  <name>Code Reader</name>
+  <vendor>codereader-dev</vendor>
+  <description><![CDATA[
+    Explains the code you have open in plain, storybook-like language, for people who do not know
+    the programming language. A side panel shows a summary of the file, a story for every method,
+    and a diagram of where each method is used and why.<br/><br/>
+    Explanations are written by the Claude Code CLI or the Codex CLI in headless mode, so one of
+    them must be installed and signed in.
+  ]]></description>
+
+  <depends>com.intellij.modules.platform</depends>
+  <depends>com.intellij.modules.jcef</depends>
+
+  <extensions defaultExtensionNs="com.intellij">
+    <toolWindow id="Code Reader"
+                anchor="right"
+                icon="/icons/codeReader.svg"
+                factoryClass="dev.codereader.ui.CodeReaderToolWindowFactory"/>
+    <applicationConfigurable parentId="tools"
+                             id="dev.codereader.settings"
+                             displayName="Code Reader"
+                             instance="dev.codereader.settings.CodeReaderConfigurable"/>
+  </extensions>
+
+  <actions>
+    <action id="CodeReader.Explain"
+            class="dev.codereader.ui.ExplainAction"
+            text="이 코드 설명하기"
+            description="열려 있는 코드를 Code Reader 패널에서 쉬운 말로 설명합니다"
+            icon="/icons/codeReader.svg">
+      <add-to-group group-id="ToolsMenu" anchor="last"/>
+      <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+    </action>
+  </actions>
+</idea-plugin>
