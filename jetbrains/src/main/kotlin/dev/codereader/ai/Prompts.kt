@@ -2,7 +2,7 @@ package dev.codereader.ai
 
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
-import dev.codereader.model.MethodExplanation
+import dev.codereader.model.LineRange
 import dev.codereader.model.Summary
 
 // Kotlin port of src/ai/prompts.ts. The wording decides how the explanations sound,
@@ -38,7 +38,9 @@ object Prompts {
         """{"type":"array","items":{"type":"object","additionalProperties":false,""" +
             """"required":["id","name","role","story","steps"],""" +
             """"properties":{"id":{"type":"string"},"name":{"type":"string"},"role":{"type":"string"},""" +
-            """"story":{"type":"string"},"steps":$STRING_ARRAY}}}"""
+            """"story":{"type":"string"},"steps":{"type":"array","items":{"type":"object","additionalProperties":false,""" +
+            """"required":["text","startLine","endLine"],"properties":{"text":{"type":"string"},""" +
+            """"startLine":{"type":"integer"},"endLine":{"type":"integer"}}}}}}}"""
 
     const val SUMMARY_ONLY_SCHEMA =
         """{"type":"object","additionalProperties":false,"required":["summary"],"properties":{"summary":$SUMMARY_SCHEMA}}"""
@@ -48,8 +50,10 @@ object Prompts {
 
     const val METHOD_LIST_SCHEMA =
         """{"type":"object","additionalProperties":false,"required":["methods"],"properties":{"methods":""" +
-            """{"type":"array","items":{"type":"object","additionalProperties":false,"required":["name","container"],""" +
-            """"properties":{"name":{"type":"string"},"container":{"type":"string"}}}}}}"""
+            """{"type":"array","items":{"type":"object","additionalProperties":false,""" +
+            """"required":["name","container","startLine","endLine"],""" +
+            """"properties":{"name":{"type":"string"},"container":{"type":"string"},""" +
+            """"startLine":{"type":"integer"},"endLine":{"type":"integer"}}}}}}"""
 
     const val PURPOSE_SCHEMA =
         """{"type":"object","additionalProperties":false,"required":["usages"],"properties":{"usages":""" +
@@ -63,14 +67,23 @@ object Prompts {
         val truncated: Boolean,
     )
 
-    data class MethodRef(val id: String, val name: String, val container: String?, val line: Int?)
+    data class MethodRef(val id: String, val name: String, val container: String?, val line: Int?, val range: LineRange?)
+
+    private const val NUMBERED_LINES =
+        "Every line of the source below starts with its line number and a bar, like \"12| \"; these prefixes are not part of the code."
 
     private fun header(file: SourceFile): List<String> = listOf(
         "Explain the source file \"${file.displayPath}\" (language: ${file.languageId}).",
         if (file.truncated) "The file is long, so only its first part is included below." else "",
+        NUMBERED_LINES,
     )
 
-    private fun sourceBlock(file: SourceFile): List<String> = listOf("", "<source_code>", file.source, "</source_code>")
+    private fun sourceBlock(file: SourceFile): List<String> =
+        listOf("", "<source_code>", numberLines(file.source), "</source_code>")
+
+    /** Prefixes every line with its 1-based number so the AI can say which lines it means. */
+    private fun numberLines(source: String): String =
+        source.lines().mapIndexed { index, line -> "${index + 1}| $line" }.joinToString("\n")
 
     fun summary(file: SourceFile): String = (
         header(file) + listOf(
@@ -89,12 +102,16 @@ object Prompts {
             "- name: the method name exactly as in the code.",
             "- role: one sentence saying what job this method has.",
             "- story: 2 to 5 sentences telling how it actually does that job, in storybook style.",
-            "- steps: 2 to 6 short steps, in order, of what happens when it runs.",
+            "- steps: 2 to 6 short steps, in order, of what happens when it runs. Each step has \"text\" (the step, in storybook style) and \"startLine\" and \"endLine\": the line numbers of the code inside this method that the step is about (the same number twice when it is a single line).",
             "",
             "Explain exactly these methods and no others, using the given ids:",
         ) + methods.map { method ->
             val owner = if (method.container.isNullOrEmpty()) "" else "${method.container}."
-            val line = if (method.line != null) " (line ${method.line + 1})" else ""
+            val line = when {
+                method.range != null -> " (lines ${method.range.startLine + 1}-${method.range.endLine + 1})"
+                method.line != null -> " (line ${method.line + 1})"
+                else -> ""
+            }
             "- ${method.id}: $owner${method.name}$line"
         } + sourceBlock(file)
         ).joinToString("\n")
@@ -103,9 +120,11 @@ object Prompts {
     fun methodList(file: SourceFile): String = listOf(
         "List the functions and methods defined in the source file \"${file.displayPath}\" (language: ${file.languageId}).",
         if (file.truncated) "The file is long, so only its first part is included below." else "",
+        NUMBERED_LINES,
         "Give them in the order they appear, at most $MAX_METHODS. Include constructors. Leave out helpers and lambdas declared inside another method.",
         "- name: the method name exactly as in the code, without parameters.",
         "- container: the class, struct or object that owns it, or an empty string when there is none.",
+        "- startLine and endLine: the line numbers of the first and last line of the whole method, body included.",
         "If the file defines none, return an empty list. Do not explain anything.",
     ).plus(sourceBlock(file)).joinToString("\n")
 
@@ -158,24 +177,28 @@ object Prompts {
         )
     }
 
-    data class ToldMethod(val id: String, val name: String, val explanation: MethodExplanation)
+    /** Line numbers are 1-based as the AI gave them; not yet checked against the file. */
+    data class ToldStep(val text: String, val startLine: Int?, val endLine: Int?)
+
+    data class ToldMethod(val id: String, val name: String, val role: String, val story: String, val steps: List<ToldStep>)
 
     fun readMethods(answer: JsonElement): List<ToldMethod> = answer.array("methods").map { method ->
         ToldMethod(
             id = method.string("id"),
             name = method.string("name"),
-            explanation = MethodExplanation(
-                role = method.string("role"),
-                story = method.string("story"),
-                steps = method.strings("steps"),
-            ),
+            role = method.string("role"),
+            story = method.string("story"),
+            steps = method.array("steps")
+                .map { ToldStep(it.string("text"), it.int("startLine"), it.int("endLine")) }
+                .filter { it.text.isNotEmpty() },
         )
     }
 
-    data class ListedMethod(val name: String, val container: String?)
+    /** Line numbers are 1-based as the AI gave them; not yet checked against the file. */
+    data class ListedMethod(val name: String, val container: String?, val startLine: Int?, val endLine: Int?)
 
     fun readMethodList(answer: JsonElement): List<ListedMethod> = answer.array("methods")
-        .map { ListedMethod(it.string("name"), it.string("container").ifEmpty { null }) }
+        .map { ListedMethod(it.string("name"), it.string("container").ifEmpty { null }, it.int("startLine"), it.int("endLine")) }
         .filter { it.name.isNotEmpty() }
 
     /** Purposes by usage id. An empty purpose means the AI judged the place not to be a real usage. */
@@ -188,6 +211,10 @@ object Prompts {
 
     private fun JsonElement?.string(name: String): String =
         child(name)?.takeIf { it.isJsonPrimitive }?.asString?.trim().orEmpty()
+
+    private fun JsonElement?.int(name: String): Int? =
+        child(name)?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }?.asDouble
+            ?.takeIf { it == Math.floor(it) && !it.isInfinite() }?.toInt()
 
     private fun JsonElement?.array(name: String): List<JsonElement> =
         child(name)?.takeIf { it.isJsonArray }?.asJsonArray?.toList().orEmpty()

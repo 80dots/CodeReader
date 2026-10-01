@@ -9,9 +9,10 @@ import {
   storySchema,
   systemPrompt,
   type StoryPart,
+  type ToldStep,
 } from '../ai/prompts';
 import { AiError, type AiProvider } from '../ai/provider';
-import type { MethodView, Stage, Summary } from '../shared/protocol';
+import type { LineRange, MethodView, Stage, Step, Summary } from '../shared/protocol';
 import { findMethods, type MethodSymbol } from './symbols';
 import { collectUsages } from './usages';
 
@@ -111,7 +112,7 @@ export async function analyze(options: AnalyzeOptions): Promise<Analysis> {
         id: `m${index + 1}`,
         name: told.name,
         ...locate(document, told.name),
-        explanation: { role: told.role, story: told.story, steps: told.steps },
+        explanation: { role: told.role, story: told.story, steps: toSteps(told.steps, undefined, document.lineCount) },
         usages: [],
         usageTotal: 0,
       }));
@@ -128,7 +129,11 @@ export async function analyze(options: AnalyzeOptions): Promise<Analysis> {
           for (const method of batch) {
             const told = answer.methods.find((m) => m.id === method.id);
             if (told) {
-              method.explanation = { role: told.role, story: told.story, steps: told.steps };
+              method.explanation = {
+                role: told.role,
+                story: told.story,
+                steps: toSteps(told.steps, method.range, document.lineCount),
+              };
             }
           }
           update();
@@ -195,9 +200,28 @@ function toMethodView(symbol: MethodSymbol, id: string): MethodView {
     container: symbol.container,
     line: symbol.selectionRange.start.line,
     character: symbol.selectionRange.start.character,
+    range: { startLine: symbol.range.start.line, endLine: symbol.range.end.line },
     usages: [],
     usageTotal: 0,
   };
+}
+
+/**
+ * Turns the AI's 1-based line numbers into ranges, dropping any that fall outside
+ * the method (or the file): a wrong highlight is worse than none.
+ */
+function toSteps(told: ToldStep[], bounds: LineRange | undefined, lineCount: number): Step[] {
+  const first = bounds?.startLine ?? 0;
+  const last = bounds?.endLine ?? lineCount - 1;
+  return told.map((step) => {
+    if (step.startLine === undefined || step.endLine === undefined) {
+      return { text: step.text };
+    }
+    const startLine = step.startLine - 1;
+    const endLine = step.endLine - 1;
+    const valid = startLine <= endLine && startLine >= first && endLine <= last;
+    return valid ? { text: step.text, range: { startLine, endLine } } : { text: step.text };
+  });
 }
 
 /** Best-effort position of a method the AI named, so it can still be revealed in the editor. */
