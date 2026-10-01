@@ -6,13 +6,21 @@ import com.intellij.openapi.application.PathManager
 import com.intellij.openapi.application.runReadActionBlocking
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.editor.EditorFactory
+import com.intellij.openapi.editor.LogicalPosition
+import com.intellij.openapi.editor.ScrollType
+import com.intellij.openapi.editor.colors.EditorColors
 import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
+import com.intellij.openapi.editor.markup.HighlighterLayer
+import com.intellij.openapi.editor.markup.HighlighterTargetArea
+import com.intellij.openapi.editor.markup.RangeHighlighter
+import com.intellij.openapi.editor.markup.TextAttributes
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
+import com.intellij.openapi.fileEditor.TextEditor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.VirtualFileManager
@@ -27,6 +35,7 @@ import dev.codereader.analysis.ProjectSources
 import dev.codereader.analysis.SourceText
 import dev.codereader.analysis.UsageScanner
 import dev.codereader.model.FileInfo
+import dev.codereader.model.LineRange
 import dev.codereader.model.PanelError
 import dev.codereader.model.PanelState
 import dev.codereader.settings.CodeReaderSettings
@@ -59,6 +68,9 @@ class CodeReaderService(private val project: Project, private val scope: Corouti
     private var file: VirtualFile? = null
     private var job: Job? = null
     private var autoJob: Job? = null
+
+    /** Marks for the code that the explanation under the pointer is about; touched on the UI thread only. */
+    private val highlights = mutableListOf<RangeHighlighter>()
 
     /** Identity of the run whose results may still be shown; replaced when a run starts or stops. */
     private var currentRun: Any? = null
@@ -165,6 +177,49 @@ class CodeReaderService(private val project: Project, private val scope: Corouti
         }
     }
 
+    /** Highlights lines of a file in every editor showing it, scrolling them into view if needed. */
+    fun highlight(uri: String, range: LineRange) {
+        // After an edit the remembered line numbers may point at the wrong code.
+        val outdated = state.stale && uri == state.file?.uri
+        val target = VirtualFileManager.getInstance().findFileByUrl(uri)
+        ApplicationManager.getApplication().invokeLater {
+            removeHighlights()
+            if (outdated || target == null || project.isDisposed) {
+                return@invokeLater
+            }
+            for (fileEditor in FileEditorManager.getInstance(project).getEditors(target)) {
+                val editor = (fileEditor as? TextEditor)?.editor ?: continue
+                val document = editor.document
+                val lastLine = minOf(range.endLine, document.lineCount - 1)
+                if (range.startLine > lastLine) {
+                    continue
+                }
+                val background = editor.colorsScheme.getAttributes(EditorColors.IDENTIFIER_UNDER_CARET_ATTRIBUTES)?.backgroundColor
+                    ?: editor.colorsScheme.getColor(EditorColors.CARET_ROW_COLOR)
+                val highlighter = editor.markupModel.addRangeHighlighter(
+                    document.getLineStartOffset(range.startLine),
+                    document.getLineEndOffset(lastLine),
+                    HighlighterLayer.SELECTION - 1,
+                    TextAttributes().apply { backgroundColor = background },
+                    HighlighterTargetArea.LINES_IN_RANGE,
+                )
+                highlighter.setErrorStripeMarkColor(background)
+                highlights += highlighter
+                editor.scrollingModel.scrollTo(LogicalPosition(range.startLine, 0), ScrollType.MAKE_VISIBLE)
+            }
+        }
+    }
+
+    fun clearHighlight() {
+        ApplicationManager.getApplication().invokeLater(::removeHighlights)
+    }
+
+    /** Must run on the UI thread, like every change to an editor's markup. */
+    private fun removeHighlights() {
+        highlights.forEach { if (it.isValid) it.dispose() }
+        highlights.clear()
+    }
+
     override fun dispose() {
         stop()
         listeners.clear()
@@ -224,6 +279,7 @@ class CodeReaderService(private val project: Project, private val scope: Corouti
     }
 
     private fun stop() {
+        clearHighlight()
         synchronized(lock) { currentRun = null }
         autoJob?.cancel()
         job?.cancel()

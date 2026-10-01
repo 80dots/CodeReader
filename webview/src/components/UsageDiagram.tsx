@@ -1,7 +1,7 @@
 import { ArrowDownIcon } from "lucide-react"
 import type { MethodView, PanelState, UsageItem } from "@shared/protocol"
 import { Skeleton } from "@/components/ui/skeleton"
-import { send } from "@/lib/vscode"
+import { highlightOnHover, send } from "@/lib/vscode"
 
 /**
  * A table drawn as a small diagram: every row is a place that calls the method,
@@ -58,6 +58,7 @@ function UsageRow({ usage, pending }: { usage: UsageItem; pending: boolean }) {
         title={`${where}\n${usage.preview}`}
         className="grid w-full cursor-pointer gap-x-3 gap-y-1 rounded-md px-2 py-1.5 text-left outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring @sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]"
         onClick={() => send({ type: "reveal", uri: usage.uri, line: usage.line, character: usage.character })}
+        {...highlightOnHover(usage.uri, { startLine: usage.line, endLine: usage.line })}
       >
         <span className="min-w-0">
           <span className="block truncate font-mono text-[12.5px] font-medium">

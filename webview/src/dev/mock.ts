@@ -82,11 +82,16 @@ const done: PanelState = {
       container: "Cart",
       line: 12,
       character: 2,
+      range: { startLine: 12, endLine: 21 },
       explanation: {
         role: "바구니에 담긴 모든 물건의 값을 더해 주는 일을 맡았어요.",
         story:
           "calculateTotal은 바구니를 들여다보며 물건을 하나씩 꺼내요. 물건마다 붙은 가격표를 보고, 몇 개를 샀는지 곱해서 공책에 적어요. 마지막 물건까지 다 적으면 공책의 숫자를 모두 더해서 알려 줘요.",
-        steps: ["바구니가 비었는지 먼저 살펴봐요", "물건마다 가격과 개수를 곱해요", "모두 더한 값을 돌려줘요"],
+        steps: [
+          { text: "바구니가 비었는지 먼저 살펴봐요", range: { startLine: 13, endLine: 15 } },
+          { text: "물건마다 가격과 개수를 곱해요", range: { startLine: 16, endLine: 19 } },
+          { text: "모두 더한 값을 돌려줘요" },
+        ],
       },
       usages: [
         {
@@ -121,7 +126,7 @@ const done: PanelState = {
       explanation: {
         role: "쿠폰을 받아서 값을 깎아 주는 일을 맡았어요.",
         story: "applyCoupon은 손님이 내민 쿠폰을 살펴보고, 쓸 수 있는 쿠폰이면 적힌 만큼 값을 깎아 줘요.",
-        steps: ["쿠폰이 아직 쓸 수 있는지 확인해요", "깎아 줄 금액을 계산해요"],
+        steps: [{ text: "쿠폰이 아직 쓸 수 있는지 확인해요" }, { text: "깎아 줄 금액을 계산해요" }],
       },
       usages: [],
       usageTotal: 0,

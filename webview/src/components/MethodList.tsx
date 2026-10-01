@@ -1,11 +1,12 @@
 import { CodeXmlIcon } from "lucide-react"
-import type { MethodView, PanelState } from "@shared/protocol"
+import type { LineRange, MethodView, PanelState } from "@shared/protocol"
 import { UsageDiagram } from "@/components/UsageDiagram"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { send } from "@/lib/vscode"
+import { cn } from "@/lib/utils"
+import { highlightOnHover, send } from "@/lib/vscode"
 
 export function MethodList({ state }: { state: PanelState }) {
   const { methods } = state
@@ -52,13 +53,17 @@ export function MethodList({ state }: { state: PanelState }) {
 function MethodCard({ method, state }: { method: MethodView; state: PanelState }) {
   const { explanation } = method
   const canReveal = method.line !== undefined && state.file !== undefined
+  const uri = state.file?.uri
+  // Without a known end, the line holding the method's name stands in for the whole method.
+  const wholeMethod: LineRange | undefined =
+    method.range ?? (method.line !== undefined ? { startLine: method.line, endLine: method.line } : undefined)
 
   return (
     <AccordionItem
       value={method.id}
       className="rounded-xl bg-card px-3.5 ring-1 ring-foreground/10 not-last:border-b-0"
     >
-      <AccordionTrigger className="gap-2 py-3 hover:no-underline">
+      <AccordionTrigger className="gap-2 py-3 hover:no-underline" {...highlightOnHover(uri, wholeMethod)}>
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-1.5 font-mono">
             <span className="truncate text-[13px] font-semibold text-link">{method.name}</span>
@@ -77,17 +82,26 @@ function MethodCard({ method, state }: { method: MethodView; state: PanelState }
       <AccordionContent className="flex flex-col gap-4 pb-3.5 [&_p:not(:last-child)]:mb-0">
         {explanation ? (
           <>
-            <p className="text-sm leading-relaxed">{explanation.story}</p>
+            <p className="text-sm leading-relaxed" {...highlightOnHover(uri, wholeMethod)}>
+              {explanation.story}
+            </p>
             {explanation.steps.length > 0 && (
               <div>
                 <SectionTitle>이렇게 움직여요</SectionTitle>
-                <ol className="mt-2 space-y-2">
+                <ol className="mt-1.5 space-y-1">
                   {explanation.steps.map((step, index) => (
-                    <li key={index} className="flex gap-2.5 text-[13px] leading-relaxed">
+                    <li
+                      key={index}
+                      className={cn(
+                        "-mx-1.5 flex gap-2.5 rounded-md px-1.5 py-0.5 text-[13px] leading-relaxed",
+                        step.range && "hover:bg-accent"
+                      )}
+                      {...highlightOnHover(uri, step.range)}
+                    >
                       <span className="mt-px flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-medium tabular-nums">
                         {index + 1}
                       </span>
-                      {step}
+                      {step.text}
                     </li>
                   ))}
                 </ol>

@@ -5,7 +5,7 @@ import { ClaudeCliProvider } from './ai/claudeCli';
 import { CodexCliProvider } from './ai/codexCli';
 import { AiError, type AiProvider } from './ai/provider';
 import { analyze, emptyAnalysis, type Analysis } from './analysis/analyzer';
-import type { FileInfo, PanelState, ProviderId } from './shared/protocol';
+import type { FileInfo, LineRange, PanelState, ProviderId } from './shared/protocol';
 
 const AUTO_DELAY_MS = 800;
 
@@ -34,7 +34,14 @@ export class Controller implements vscode.Disposable {
   readonly onDidChangeState = this.emitter.event;
 
   private readonly cache = new Map<string, CacheEntry>();
-  private readonly disposables: vscode.Disposable[] = [this.emitter];
+  /** Marks the code that the explanation under the pointer is about. */
+  private readonly highlightDecoration = vscode.window.createTextEditorDecorationType({
+    isWholeLine: true,
+    backgroundColor: new vscode.ThemeColor('editor.wordHighlightBackground'),
+    overviewRulerColor: new vscode.ThemeColor('editorOverviewRuler.wordHighlightForeground'),
+    overviewRulerLane: vscode.OverviewRulerLane.Full,
+  });
+  private readonly disposables: vscode.Disposable[] = [this.emitter, this.highlightDecoration];
   private document?: vscode.TextDocument;
   private running?: AbortController;
   private autoTimer?: NodeJS.Timeout;
@@ -160,6 +167,33 @@ export class Controller implements vscode.Disposable {
     });
   }
 
+  /** Highlights lines of a file in every editor showing it, scrolling them into view if needed. */
+  highlight(uri: string, range: LineRange): void {
+    this.clearHighlight();
+    // After an edit the remembered line numbers may point at the wrong code.
+    if (this.current.stale && uri === this.current.file?.uri) {
+      return;
+    }
+    for (const editor of vscode.window.visibleTextEditors) {
+      if (editor.document.uri.toString() !== uri) {
+        continue;
+      }
+      const lastLine = Math.min(range.endLine, editor.document.lineCount - 1);
+      if (range.startLine > lastLine) {
+        continue;
+      }
+      const lines = new vscode.Range(range.startLine, 0, lastLine, editor.document.lineAt(lastLine).text.length);
+      editor.setDecorations(this.highlightDecoration, [lines]);
+      editor.revealRange(lines, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+    }
+  }
+
+  clearHighlight(): void {
+    for (const editor of vscode.window.visibleTextEditors) {
+      editor.setDecorations(this.highlightDecoration, []);
+    }
+  }
+
   dispose(): void {
     this.stop();
     this.disposables.forEach((d) => d.dispose());
@@ -212,6 +246,7 @@ export class Controller implements vscode.Disposable {
   }
 
   private stop(): void {
+    this.clearHighlight();
     clearTimeout(this.autoTimer);
     this.running?.abort();
     this.running = undefined;

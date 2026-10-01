@@ -3,8 +3,11 @@ package dev.codereader.analysis
 import dev.codereader.ai.AiProvider
 import dev.codereader.ai.AiRequest
 import dev.codereader.ai.Prompts
+import dev.codereader.model.LineRange
+import dev.codereader.model.MethodExplanation
 import dev.codereader.model.MethodView
 import dev.codereader.model.PanelState
+import dev.codereader.model.Step
 import dev.codereader.model.Summary
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
@@ -56,6 +59,7 @@ class Analyzer(
             truncated = truncated,
         )
         val system = Prompts.system(language)
+        val lineCount = text.lines().size
         // Story requests running at once (the usage request runs beside them).
         val storySlots = Semaphore(STORY_CONCURRENCY)
 
@@ -88,12 +92,19 @@ class Analyzer(
                 for (batch in methods.chunked(METHODS_PER_REQUEST)) {
                     launch {
                         val told = storySlots.withPermit {
-                            val refs = batch.map { Prompts.MethodRef(it.id, it.name, it.container, it.line) }
+                            val refs = batch.map { Prompts.MethodRef(it.id, it.name, it.container, it.line, it.range) }
                             Prompts.readMethods(provider.run(AiRequest(system, Prompts.methods(file, refs), Prompts.METHODS_ONLY_SCHEMA)))
                         }.associateBy { it.id }
                         update { current ->
                             current.copy(methods = current.methods.map { method ->
-                                told[method.id]?.let { method.copy(explanation = it.explanation) } ?: method
+                                val answer = told[method.id] ?: return@map method
+                                method.copy(
+                                    explanation = MethodExplanation(
+                                        role = answer.role,
+                                        story = answer.story,
+                                        steps = answer.steps.map { Step(it.text, checkedRange(it.startLine, it.endLine, method.range, lineCount)) },
+                                    ),
+                                )
                             })
                         }
                     }
@@ -166,10 +177,13 @@ class Analyzer(
                 }
                 pattern.find(line)?.let { lineIndex to it.range.first }
             }
+            // The AI says which lines the method spans; trust that only if the name really is in there.
+            val told = checkedRange(method.startLine, method.endLine, null, lines.size)
+            val inside = candidates.filter { (lineIndex, _) -> told != null && lineIndex in told.startLine..told.endLine }
+            val declares = { candidate: Pair<Int, Int> -> heuristics.isDeclaration(lines[candidate.first], name, candidate.second) }
             // Prefer a line that reads like a declaration; otherwise settle for the first mention.
-            val position = candidates.firstOrNull { (lineIndex, column) ->
-                heuristics.isDeclaration(lines[lineIndex], name, column)
-            } ?: candidates.firstOrNull()
+            val position = inside.firstOrNull(declares) ?: inside.firstOrNull()
+                ?: candidates.firstOrNull(declares) ?: candidates.firstOrNull()
             position?.let { claimed += it.first }
             MethodView(
                 id = "m${index + 1}",
@@ -177,8 +191,23 @@ class Analyzer(
                 container = method.container,
                 line = position?.first,
                 character = position?.second,
+                range = told.takeIf { inside.isNotEmpty() },
             )
         }
+    }
+
+    /**
+     * Turns the AI's 1-based line numbers into a range, or null when they fall outside
+     * `bounds` (or the file): a wrong highlight is worse than none.
+     */
+    private fun checkedRange(startLine: Int?, endLine: Int?, bounds: LineRange?, lineCount: Int): LineRange? {
+        if (startLine == null || endLine == null) {
+            return null
+        }
+        val range = LineRange(startLine - 1, endLine - 1)
+        val first = bounds?.startLine ?: 0
+        val last = bounds?.endLine ?: (lineCount - 1)
+        return range.takeIf { it.startLine <= it.endLine && it.startLine >= first && it.endLine <= last }
     }
 
     companion object {

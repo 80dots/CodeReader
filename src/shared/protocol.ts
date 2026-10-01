@@ -14,10 +14,22 @@ export interface Summary {
   keyPoints: string[];
 }
 
+/** A run of whole lines in a file; both ends are 0-based and included. */
+export interface LineRange {
+  startLine: number;
+  endLine: number;
+}
+
+export interface Step {
+  text: string;
+  /** The lines of code this step describes, when the AI could point at them. */
+  range?: LineRange;
+}
+
 export interface MethodExplanation {
   role: string;
   story: string;
-  steps: string[];
+  steps: Step[];
 }
 
 export interface UsageItem {
@@ -42,6 +54,8 @@ export interface MethodView {
   /** 0-based position of the method name; absent when the AI found the method itself. */
   line?: number;
   character?: number;
+  /** The whole method, body included. */
+  range?: LineRange;
   explanation?: MethodExplanation;
   usages: UsageItem[];
   /** How many usages exist in total (may exceed usages.length). */
@@ -96,4 +110,7 @@ export type WebviewMessage =
   | { type: 'explain' }
   | { type: 'cancel' }
   | { type: 'reveal'; uri: string; line: number; character: number }
+  /** The pointer rests on an explanation: mark the code it is about in the editor. */
+  | { type: 'highlight'; uri: string; range: LineRange }
+  | { type: 'clearHighlight' }
   | { type: 'openSettings' };

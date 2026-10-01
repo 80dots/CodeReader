@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import type { HostMessage, PanelState, WebviewMessage } from "@shared/protocol"
+import type { HostMessage, LineRange, PanelState, WebviewMessage } from "@shared/protocol"
 
 interface VsCodeApi {
   postMessage(message: WebviewMessage): void
@@ -20,6 +20,30 @@ const api: VsCodeApi =
 
 export function send(message: WebviewMessage): void {
   api.postMessage(message)
+}
+
+// Long enough that sweeping the pointer across the panel does not make the editor jump around.
+const HOVER_DELAY_MS = 120
+let pendingHighlight: number | undefined
+
+/**
+ * Props for an element that explains some code: while the pointer (or keyboard focus)
+ * rests on it, those lines are highlighted in the editor. Do not nest such elements;
+ * leaving the inner one would clear the outer one's highlight.
+ */
+export function highlightOnHover(uri: string | undefined, range: LineRange | undefined) {
+  if (!uri || !range) {
+    return {}
+  }
+  const show = () => {
+    window.clearTimeout(pendingHighlight)
+    pendingHighlight = window.setTimeout(() => send({ type: "highlight", uri, range }), HOVER_DELAY_MS)
+  }
+  const hide = () => {
+    window.clearTimeout(pendingHighlight)
+    send({ type: "clearHighlight" })
+  }
+  return { onMouseEnter: show, onMouseLeave: hide, onFocus: show, onBlur: hide }
 }
 
 /** The panel state pushed by the extension host; undefined until the first message arrives. */

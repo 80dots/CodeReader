@@ -42,13 +42,26 @@ export class CodeReaderViewProvider implements vscode.WebviewViewProvider {
         case 'reveal':
           void this.controller.reveal(message.uri, message.line, message.character);
           break;
+        case 'highlight':
+          this.controller.highlight(message.uri, message.range);
+          break;
+        case 'clearHighlight':
+          this.controller.clearHighlight();
+          break;
         case 'openSettings':
           void vscode.commands.executeCommand('codeReader.openSettings');
           break;
       }
     });
-    view.onDidChangeVisibility(() => this.postState());
+    view.onDidChangeVisibility(() => {
+      // A hidden panel never reports the pointer leaving, so the mark would stay.
+      if (!view.visible) {
+        this.controller.clearHighlight();
+      }
+      this.postState();
+    });
     view.onDidDispose(() => {
+      this.controller.clearHighlight();
       this.view = undefined;
       this.ready = false;
     });

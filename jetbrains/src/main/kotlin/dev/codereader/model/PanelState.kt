@@ -16,10 +16,19 @@ data class Summary(
     val keyPoints: List<String>,
 )
 
+/** A run of whole lines in a file; both ends are 0-based and included. */
+data class LineRange(val startLine: Int, val endLine: Int)
+
+data class Step(
+    val text: String,
+    /** The lines of code this step describes, when the AI could point at them. */
+    val range: LineRange? = null,
+)
+
 data class MethodExplanation(
     val role: String,
     val story: String,
-    val steps: List<String>,
+    val steps: List<Step>,
 )
 
 data class UsageItem(
@@ -41,6 +50,8 @@ data class MethodView(
     /** 0-based position of the method name, when it could be found in the text. */
     val line: Int?,
     val character: Int?,
+    /** The whole method, body included. */
+    val range: LineRange? = null,
     val explanation: MethodExplanation? = null,
     val usages: List<UsageItem> = emptyList(),
     val usageTotal: Int = 0,

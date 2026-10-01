@@ -1,4 +1,4 @@
-import type { MethodExplanation, Summary } from '../shared/protocol';
+import type { LineRange, Summary } from '../shared/protocol';
 
 /** Most methods explained for one file. */
 export const MAX_METHODS = 40;
@@ -46,7 +46,19 @@ const methodsSchema = {
       name: { type: 'string' },
       role: { type: 'string' },
       story: { type: 'string' },
-      steps: stringArray,
+      steps: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['text', 'startLine', 'endLine'],
+          properties: {
+            text: { type: 'string' },
+            startLine: { type: 'integer' },
+            endLine: { type: 'integer' },
+          },
+        },
+      },
     },
   },
 } as const;
@@ -92,6 +104,8 @@ export interface StoryMethodInput {
   container?: string;
   /** 0-based line of the method name. */
   line?: number;
+  /** The whole method, when the editor knows where it ends. */
+  range?: LineRange;
 }
 
 export interface StoryPromptInput {
@@ -111,6 +125,7 @@ export function storyPrompt(input: StoryPromptInput): string {
   const lines = [
     `Explain the source file "${input.displayPath}" (language: ${input.languageId}).`,
     input.truncated ? 'The file is long, so only its first part is included below.' : '',
+    'Every line of the source below starts with its line number and a bar, like "12| "; these prefixes are not part of the code.',
   ];
 
   if (input.parts.includes('summary')) {
@@ -130,7 +145,7 @@ export function storyPrompt(input: StoryPromptInput): string {
       '- name: the method name exactly as in the code.',
       '- role: one sentence saying what job this method has.',
       '- story: 2 to 5 sentences telling how it actually does that job, in storybook style.',
-      '- steps: 2 to 6 short steps, in order, of what happens when it runs.',
+      '- steps: 2 to 6 short steps, in order, of what happens when it runs. Each step has "text" (the step, in storybook style) and "startLine" and "endLine": the line numbers of the code inside this method that the step is about (the same number twice when it is a single line).',
       '',
     );
     if (input.methods.length > 0) {
@@ -139,7 +154,11 @@ export function storyPrompt(input: StoryPromptInput): string {
         ...input.methods.map(
           (m) =>
             `- ${m.id}: ${m.container ? `${m.container}.` : ''}${m.name}` +
-            (m.line !== undefined ? ` (line ${m.line + 1})` : ''),
+            (m.range
+              ? ` (lines ${m.range.startLine + 1}-${m.range.endLine + 1})`
+              : m.line !== undefined
+                ? ` (line ${m.line + 1})`
+                : ''),
         ),
       );
     } else {
@@ -149,8 +168,16 @@ export function storyPrompt(input: StoryPromptInput): string {
     }
   }
 
-  lines.push('', '<source_code>', input.source, '</source_code>');
+  lines.push('', '<source_code>', numberLines(input.source), '</source_code>');
   return lines.join('\n');
+}
+
+/** Prefixes every line with its 1-based number so the AI can say which lines it means. */
+function numberLines(source: string): string {
+  return source
+    .split(/\r?\n/)
+    .map((line, index) => `${index + 1}| ${line}`)
+    .join('\n');
 }
 
 export interface PurposePromptItem {
@@ -183,9 +210,19 @@ export function purposePrompt(displayPath: string, items: PurposePromptItem[]): 
   ].join('\n');
 }
 
-export interface StoryMethodResult extends MethodExplanation {
+export interface ToldStep {
+  text: string;
+  /** 1-based line numbers as the AI gave them; not yet checked against the file. */
+  startLine?: number;
+  endLine?: number;
+}
+
+export interface StoryMethodResult {
   id: string;
   name: string;
+  role: string;
+  story: string;
+  steps: ToldStep[];
 }
 
 export interface StoryResult {
@@ -211,7 +248,12 @@ export function readStoryResult(value: unknown): StoryResult {
         name: asString(method.name),
         role: asString(method.role),
         story: asString(method.story),
-        steps: asStrings(method.steps),
+        steps: asArray(method.steps)
+          .map((entry) => {
+            const step = asRecord(entry);
+            return { text: asString(step.text), startLine: asInteger(step.startLine), endLine: asInteger(step.endLine) };
+          })
+          .filter((step) => step.text),
       };
     }),
   };
@@ -239,6 +281,10 @@ function asArray(value: unknown): unknown[] {
 
 function asString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function asInteger(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) ? value : undefined;
 }
 
 function asStrings(value: unknown): string[] {

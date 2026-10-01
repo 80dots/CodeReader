@@ -16,6 +16,7 @@ import com.intellij.ui.jcef.JBCefBrowser
 import com.intellij.ui.jcef.JBCefBrowserBase
 import com.intellij.ui.jcef.JBCefJSQuery
 import dev.codereader.CodeReaderService
+import dev.codereader.model.LineRange
 import dev.codereader.model.PanelState
 import dev.codereader.settings.CodeReaderConfigurable
 import javax.swing.JComponent
@@ -57,6 +58,7 @@ class CodeReaderPanel(private val project: Project, parent: Disposable) : Dispos
     }
 
     override fun dispose() {
+        service.clearHighlight()
         removeListener()
     }
 
@@ -70,6 +72,11 @@ class CodeReaderPanel(private val project: Project, parent: Disposable) : Dispos
             "explain" -> service.explain(force = true)
             "cancel" -> service.cancel()
             "reveal" -> service.reveal(message.text("uri"), message.int("line"), message.int("character"))
+            "highlight" -> {
+                val range = message.get("range")?.takeIf { it.isJsonObject }?.asJsonObject ?: return
+                service.highlight(message.text("uri"), LineRange(range.int("startLine"), range.int("endLine")))
+            }
+            "clearHighlight" -> service.clearHighlight()
             "openSettings" -> ApplicationManager.getApplication().invokeLater {
                 ShowSettingsUtil.getInstance().showSettingsDialog(project, CodeReaderConfigurable::class.java)
             }
