@@ -57,6 +57,47 @@ data class MethodView(
     val usageTotal: Int = 0,
 )
 
+data class VariableExplanation(
+    /** What the variable holds or remembers. */
+    val role: String,
+    /** How the code in this file uses it. */
+    val story: String,
+)
+
+/** A variable defined outside any method: a global, a constant, or a field of a class. */
+data class VariableView(
+    val id: String,
+    val name: String,
+    val container: String?,
+    /** 0-based position of the variable's name, when it could be found in the text. */
+    val line: Int?,
+    val character: Int?,
+    /** The whole declaration. */
+    val range: LineRange? = null,
+    val explanation: VariableExplanation? = null,
+)
+
+/** Something a class inherits from: a base class or an interface it implements. */
+data class ParentView(
+    val name: String,
+    /** Where the parent is defined, when it was found inside the project. */
+    val uri: String? = null,
+    val line: Int? = null,
+    val character: Int? = null,
+    val explanation: String? = null,
+)
+
+/** A class that inherits from something. */
+data class ClassView(
+    val id: String,
+    val name: String,
+    /** 0-based position of the class name, when it could be found in the text. */
+    val line: Int?,
+    val character: Int?,
+    val role: String? = null,
+    val parents: List<ParentView> = emptyList(),
+)
+
 data class PanelError(
     val kind: String,
     val message: String,
@@ -70,6 +111,8 @@ data class PanelState(
     val stale: Boolean = false,
     val truncated: Boolean = false,
     val summary: Summary? = null,
+    val classes: List<ClassView> = emptyList(),
+    val variables: List<VariableView> = emptyList(),
     val methods: List<MethodView> = emptyList(),
     val storyPending: Boolean = false,
     val usageSearchPending: Boolean = false,
@@ -77,6 +120,8 @@ data class PanelState(
     val error: PanelError? = null,
     val usageError: String? = null,
     val usageApproximate: Boolean = false,
+    /** When the shown explanation was written (ISO time), if it came from the saved copy on disk. */
+    val savedAt: String? = null,
     val provider: String = "claude",
     val mode: String = "manual",
 ) {

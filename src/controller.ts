@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { ClaudeCliProvider } from './ai/claudeCli';
@@ -6,16 +5,22 @@ import { CodexCliProvider } from './ai/codexCli';
 import { AiError, type AiProvider } from './ai/provider';
 import { analyze, emptyAnalysis, type Analysis } from './analysis/analyzer';
 import type { FileInfo, LineRange, PanelState, ProviderId } from './shared/protocol';
+import { canSave, contentHashOf, loadExplanation, saveExplanation } from './store';
 
 const AUTO_DELAY_MS = 800;
 
 // Editors that show something other than code the user opened.
 const IGNORED_SCHEMES = new Set(['output', 'debug', 'comment', 'vscode', 'vscode-settings', 'vscode-userdata']);
 
+/** An explanation that has been written, as kept in memory and on disk. */
 interface CacheEntry {
-  /** Identifies the file content and the settings the explanation was written with. */
-  fingerprint: string;
+  /** Identifies the file content the explanation was written for. */
+  contentHash: string;
   analysis: Analysis;
+  /** ISO time the explanation was written. */
+  savedAt: string;
+  /** Written by an editor that could only search usages by name (see PanelState). */
+  usageApproximate: boolean;
 }
 
 interface Settings {
@@ -80,11 +85,13 @@ export class Controller implements vscode.Disposable {
     }
     const settings = readSettings();
     const key = document.uri.toString();
-    const fingerprint = fingerprintOf(document, settings);
-    const cached = this.cache.get(key);
-    if (!force && cached?.fingerprint === fingerprint) {
-      this.showCached(cached, false);
-      return;
+    const contentHash = contentHashOf(document.getText());
+    if (!force) {
+      const cached = this.cache.get(key) ?? (await this.loadSaved(document));
+      if (cached?.contentHash === contentHash && this.document === document) {
+        this.showCached(cached, false);
+        return;
+      }
     }
 
     this.stop();
@@ -109,15 +116,17 @@ export class Controller implements vscode.Disposable {
           }
         },
       });
-      this.cache.set(key, { fingerprint, analysis });
+      const entry: CacheEntry = { contentHash, analysis, savedAt: new Date().toISOString(), usageApproximate: false };
+      this.cache.set(key, entry);
       if (isCurrent()) {
         this.running = undefined;
         this.setState({
           ...viewOf(analysis),
           status: 'done',
-          stale: fingerprintOf(document, settings) !== fingerprint,
+          stale: contentHashOf(document.getText()) !== contentHash,
         });
       }
+      await this.save(document, entry, settings);
     } catch (error) {
       // Stops the sibling request that may still be running.
       abort.abort();
@@ -216,17 +225,29 @@ export class Controller implements vscode.Disposable {
     this.document = editor.document;
     this.showFile(editor.document);
     if (readSettings().mode === 'auto' && this.current.status === 'idle') {
-      this.autoTimer = setTimeout(() => void this.explain(false), AUTO_DELAY_MS);
+      this.autoTimer = setTimeout(() => {
+        // A saved explanation may have been found in the meantime; that one is shown instead.
+        if (this.current.status === 'idle') {
+          void this.explain(false);
+        }
+      }, AUTO_DELAY_MS);
     }
   }
 
+  /** Shows what is already known about a file: the explanation from memory or from disk, or the start screen. */
   private showFile(document: vscode.TextDocument): void {
     const cached = this.cache.get(document.uri.toString());
     if (cached) {
-      this.showCached(cached, cached.fingerprint !== fingerprintOf(document, readSettings()));
-    } else {
-      this.setState({ ...idleState(), file: fileInfo(document) });
+      this.showCached(cached, cached.contentHash !== contentHashOf(document.getText()));
+      return;
     }
+    this.setState({ ...idleState(), file: fileInfo(document) });
+    void this.loadSaved(document).then((saved) => {
+      // Reading the disk takes a moment; the user may have moved on or started a new explanation.
+      if (saved && this.document === document && this.current.status === 'idle') {
+        this.showCached(saved, saved.contentHash !== contentHashOf(document.getText()));
+      }
+    });
   }
 
   private showCached(entry: CacheEntry, stale: boolean): void {
@@ -236,7 +257,62 @@ export class Controller implements vscode.Disposable {
       status: 'done',
       stale,
       error: undefined,
+      savedAt: entry.savedAt || undefined,
+      usageApproximate: entry.usageApproximate,
     });
+  }
+
+  /** Reads the explanation saved on disk for a file, remembering it for next time. */
+  private async loadSaved(document: vscode.TextDocument): Promise<CacheEntry | undefined> {
+    if (!canSave(document.uri)) {
+      return undefined;
+    }
+    const saved = await loadExplanation(document.uri);
+    if (!saved) {
+      return undefined;
+    }
+    const key = document.uri.toString();
+    const entry: CacheEntry = {
+      contentHash: saved.contentHash,
+      savedAt: saved.savedAt,
+      usageApproximate: saved.usageApproximate,
+      analysis: {
+        ...emptyAnalysis(),
+        truncated: saved.truncated,
+        summary: saved.summary,
+        classes: saved.classes,
+        variables: saved.variables,
+        methods: saved.methods,
+      },
+    };
+    // An explanation written in this session while the disk was being read is newer.
+    if (!this.cache.has(key)) {
+      this.cache.set(key, entry);
+    }
+    return this.cache.get(key);
+  }
+
+  private async save(document: vscode.TextDocument, entry: CacheEntry, settings: Settings): Promise<void> {
+    if (!canSave(document.uri)) {
+      return;
+    }
+    try {
+      await saveExplanation(document.uri, {
+        contentHash: entry.contentHash,
+        savedAt: entry.savedAt,
+        provider: settings.provider,
+        language: settings.language,
+        usageApproximate: entry.usageApproximate,
+        truncated: entry.analysis.truncated,
+        summary: entry.analysis.summary,
+        classes: entry.analysis.classes,
+        variables: entry.analysis.variables,
+        methods: entry.analysis.methods,
+      });
+    } catch (error) {
+      // The explanation is still shown and kept in memory; only the copy for next time is missing.
+      console.warn('Code Reader could not save the explanation', error);
+    }
   }
 
   private markStale(): void {
@@ -259,7 +335,14 @@ export class Controller implements vscode.Disposable {
 }
 
 function idleState(): Omit<PanelState, 'provider' | 'mode' | 'file'> {
-  return { ...viewOf(emptyAnalysis()), status: 'idle', stale: false, error: undefined };
+  return {
+    ...viewOf(emptyAnalysis()),
+    status: 'idle',
+    stale: false,
+    error: undefined,
+    savedAt: undefined,
+    usageApproximate: undefined,
+  };
 }
 
 function viewOf(analysis: Analysis) {
@@ -268,6 +351,8 @@ function viewOf(analysis: Analysis) {
     truncated: analysis.truncated,
     summary: analysis.summary,
     // Copied so the webview always receives a fresh snapshot of in-progress data.
+    classes: analysis.classes.map((item) => ({ ...item, parents: item.parents.map((parent) => ({ ...parent })) })),
+    variables: analysis.variables.map((variable) => ({ ...variable })),
     methods: analysis.methods.map((method) => ({ ...method, usages: [...method.usages] })),
     storyPending: analysis.storyPending,
     usageSearchPending: analysis.usageSearchPending,
@@ -305,12 +390,4 @@ function readSettings(): Settings {
 function createProvider(settings: Settings, cwd: string): AiProvider {
   const options = { command: settings.command, model: settings.model, cwd, timeoutMs: settings.timeoutMs };
   return settings.provider === 'codex' ? new CodexCliProvider(options) : new ClaudeCliProvider(options);
-}
-
-function fingerprintOf(document: vscode.TextDocument, settings: Settings): string {
-  return createHash('sha1')
-    .update([settings.provider, settings.model, settings.language, settings.maxUsagesPerMethod].join('\n'))
-    .update('\n')
-    .update(document.getText())
-    .digest('hex');
 }

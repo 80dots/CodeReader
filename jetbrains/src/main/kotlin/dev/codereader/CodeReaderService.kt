@@ -5,6 +5,7 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.PathManager
 import com.intellij.openapi.application.runReadActionBlocking
 import com.intellij.openapi.components.Service
+import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.editor.LogicalPosition
 import com.intellij.openapi.editor.ScrollType
@@ -47,7 +48,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.security.MessageDigest
+import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -55,10 +56,15 @@ import java.util.concurrent.CopyOnWriteArrayList
 @Service(Service.Level.PROJECT)
 class CodeReaderService(private val project: Project, private val scope: CoroutineScope) : Disposable {
 
+    /** An explanation that has been written, as kept in memory and on disk. */
     private class CacheEntry(
-        /** Identifies the file content and the settings the explanation was written with. */
-        val fingerprint: String,
+        /** Identifies the file content the explanation was written for. */
+        val contentHash: String,
         val analysis: Analysis,
+        /** ISO time the explanation was written. */
+        val savedAt: String,
+        /** Written by an editor that could only search usages by name (see PanelState). */
+        val usageApproximate: Boolean,
     )
 
     private val listeners = CopyOnWriteArrayList<(PanelState) -> Unit>()
@@ -114,11 +120,13 @@ class CodeReaderService(private val project: Project, private val scope: Corouti
         val target = file ?: return
         val text = textOf(target) ?: return
         val settings = CodeReaderSettings.getInstance().snapshot()
-        val fingerprint = fingerprint(text, settings)
-        val cached = cache[target.url]
-        if (!force && cached?.fingerprint == fingerprint) {
-            showCached(target, cached, stale = false)
-            return
+        val contentHash = ExplanationStore.contentHash(text)
+        if (!force) {
+            val cached = cache[target.url] ?: loadSaved(target)
+            if (cached?.contentHash == contentHash) {
+                showCached(target, cached, stale = false)
+                return
+            }
         }
 
         stop()
@@ -144,12 +152,17 @@ class CodeReaderService(private val project: Project, private val scope: Corouti
                             )
                         }
                     },
+                    findParent = { name ->
+                        withContext(Dispatchers.IO) { ProjectSources.findTypeDeclaration(project, target, text, name) }
+                    },
                     onUpdate = { partial -> setStateIfCurrent(run) { view(it, partial) } },
                 )
                 val analysis = analyzer.analyze(info.displayPath, info.languageId, extension, text)
-                cache[target.url] = CacheEntry(fingerprint, analysis)
-                val stale = textOf(target)?.let { fingerprint(it, settings) != fingerprint } ?: false
+                val entry = CacheEntry(contentHash, analysis, Instant.now().toString(), usageApproximate = true)
+                cache[target.url] = entry
+                val stale = textOf(target)?.let { ExplanationStore.contentHash(it) != contentHash } ?: false
                 setStateIfCurrent(run) { view(it, analysis).copy(status = PanelState.STATUS_DONE, stale = stale) }
+                withContext(Dispatchers.IO) { save(target, entry, settings) }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: AiException) {
@@ -243,26 +256,77 @@ class CodeReaderService(private val project: Project, private val scope: Corouti
             // Skimming through tabs should not start an explanation for every one of them.
             autoJob = scope.launch {
                 delay(AUTO_DELAY_MS)
-                explain(force = false)
+                // A saved explanation may have been found in the meantime; that one is shown instead.
+                if (state.status == PanelState.STATUS_IDLE) {
+                    explain(force = false)
+                }
             }
         }
     }
 
+    /** Shows what is already known about a file: the explanation from memory or from disk, or the start screen. */
     private fun showFile(target: VirtualFile) {
         val cached = cache[target.url]
         if (cached != null) {
-            val settings = CodeReaderSettings.getInstance().snapshot()
-            val stale = textOf(target)?.let { fingerprint(it, settings) != cached.fingerprint } ?: false
-            showCached(target, cached, stale)
-        } else {
-            setState { withSettings(PanelState(file = fileInfo(target))) }
+            showCached(target, cached, isStale(target, cached))
+            return
+        }
+        setState { withSettings(PanelState(file = fileInfo(target))) }
+        scope.launch(Dispatchers.IO) {
+            val saved = loadSaved(target) ?: return@launch
+            // Reading the disk takes a moment; the user may have moved on or started a new explanation.
+            if (file == target && state.status == PanelState.STATUS_IDLE) {
+                showCached(target, saved, isStale(target, saved))
+            }
         }
     }
 
+    private fun isStale(target: VirtualFile, entry: CacheEntry): Boolean =
+        textOf(target)?.let { ExplanationStore.contentHash(it) != entry.contentHash } ?: false
+
     private fun showCached(target: VirtualFile, entry: CacheEntry, stale: Boolean) {
         setState {
-            view(withSettings(PanelState(file = fileInfo(target), usageApproximate = true)), entry.analysis)
-                .copy(status = PanelState.STATUS_DONE, stale = stale)
+            view(withSettings(PanelState(file = fileInfo(target))), entry.analysis).copy(
+                status = PanelState.STATUS_DONE,
+                stale = stale,
+                savedAt = entry.savedAt.ifEmpty { null },
+                usageApproximate = entry.usageApproximate,
+            )
+        }
+    }
+
+    /** Reads the explanation saved on disk for a file, remembering it for next time. */
+    private fun loadSaved(target: VirtualFile): CacheEntry? {
+        if (!target.isInLocalFileSystem) {
+            return null
+        }
+        val saved = ExplanationStore.load(target.path) ?: return null
+        // An explanation written in this session while the disk was being read is newer.
+        return cache.getOrPut(target.url) {
+            CacheEntry(saved.contentHash, saved.analysis, saved.savedAt, saved.usageApproximate)
+        }
+    }
+
+    private fun save(target: VirtualFile, entry: CacheEntry, settings: CodeReaderSettings.Snapshot) {
+        // Only files on disk have a stable identity to save an explanation under.
+        if (!target.isInLocalFileSystem) {
+            return
+        }
+        try {
+            ExplanationStore.save(
+                target.path,
+                ExplanationStore.Saved(
+                    contentHash = entry.contentHash,
+                    savedAt = entry.savedAt,
+                    provider = settings.provider,
+                    language = settings.language,
+                    usageApproximate = entry.usageApproximate,
+                    analysis = entry.analysis,
+                ),
+            )
+        } catch (error: Exception) {
+            // The explanation is still shown and kept in memory; only the copy for next time is missing.
+            thisLogger().warn("Code Reader could not save the explanation", error)
         }
     }
 
@@ -309,6 +373,8 @@ class CodeReaderService(private val project: Project, private val scope: Corouti
         stage = analysis.stage,
         truncated = analysis.truncated,
         summary = analysis.summary,
+        classes = analysis.classes,
+        variables = analysis.variables,
         methods = analysis.methods,
         storyPending = analysis.storyPending,
         usageSearchPending = analysis.usageSearchPending,
@@ -342,15 +408,6 @@ class CodeReaderService(private val project: Project, private val scope: Corouti
             timeoutMs = settings.timeoutMs,
         )
         return if (settings.provider == CodeReaderSettings.PROVIDER_CODEX) CodexCliProvider(options) else ClaudeCliProvider(options)
-    }
-
-    private fun fingerprint(text: String, settings: CodeReaderSettings.Snapshot): String {
-        val digest = MessageDigest.getInstance("SHA-1")
-        val key = listOf(settings.provider, settings.model, settings.language, settings.maxUsagesPerMethod).joinToString("\n")
-        digest.update(key.toByteArray())
-        digest.update('\n'.code.toByte())
-        digest.update(text.toByteArray())
-        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     companion object {
